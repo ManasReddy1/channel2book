@@ -7,8 +7,8 @@ Run: streamlit run web.py
 import asyncio
 import json
 import os
+import subprocess
 import sys
-import time
 from pathlib import Path
 
 import streamlit as st
@@ -16,10 +16,9 @@ import streamlit as st
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from channel2book.config import Config, FilterConfig, LLMConfig, OutputConfig, WhisperConfig
+from channel2book.config import Config, FilterConfig, LLMConfig, OutputConfig
 from channel2book.db import Database
 from channel2book.utils.cost import estimate_pipeline_cost, format_cost
-from channel2book.utils.tokens import format_tokens
 
 # --- Page Config ---
 st.set_page_config(
@@ -29,103 +28,96 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- Custom CSS ---
+# --- YouTube-style CSS ---
 st.markdown("""
 <style>
-    /* Main theme */
-    .stApp {
-        background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-    }
+    .stApp { background-color: #f9f9f9; }
 
-    /* Hero banner */
     .hero {
         text-align: center;
-        padding: 2rem 0 1rem 0;
+        padding: 1.5rem 0 0.5rem 0;
+        border-bottom: 3px solid #ff0000;
+        margin-bottom: 1.5rem;
     }
     .hero h1 {
-        font-size: 3rem;
-        background: linear-gradient(90deg, #f9d423, #ff4e50);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        font-size: 2.5rem;
+        color: #282828;
         font-weight: 800;
-        margin-bottom: 0.3rem;
+        margin-bottom: 0.2rem;
     }
-    .hero p {
-        color: #b0b0b0;
-        font-size: 1.1rem;
-    }
+    .hero h1 span { color: #ff0000; }
+    .hero p { color: #606060; font-size: 1rem; }
 
-    /* Cards */
     .stat-card {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
+        background: #ffffff;
+        border: 1px solid #e0e0e0;
         border-radius: 12px;
-        padding: 1.2rem;
+        padding: 1rem;
         text-align: center;
-        backdrop-filter: blur(10px);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
-    .stat-card h3 {
-        color: #f9d423;
-        font-size: 2rem;
-        margin: 0;
-    }
-    .stat-card p {
-        color: #888;
-        font-size: 0.85rem;
-        margin: 0;
-    }
+    .stat-card h3 { color: #ff0000; font-size: 1.8rem; margin: 0; }
+    .stat-card p { color: #606060; font-size: 0.8rem; margin: 0; }
 
-    /* Stage badges */
-    .stage-done { color: #00e676; }
-    .stage-running { color: #ffd740; }
-    .stage-pending { color: #666; }
-    .stage-failed { color: #ff5252; }
-
-    /* Book preview */
-    .book-card {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
+    .playlist-row {
+        background: #ffffff;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        padding: 0.6rem 1rem;
+        margin: 0.3rem 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .playlist-row .pl-title { color: #282828; font-weight: 500; }
+    .playlist-row .pl-count {
+        background: #ff0000;
+        color: #fff;
+        padding: 0.15rem 0.6rem;
         border-radius: 12px;
-        padding: 1.5rem;
-        margin: 0.5rem 0;
-    }
-
-    /* Success banner */
-    .success-banner {
-        background: linear-gradient(90deg, #00c853, #00e676);
-        color: #000;
-        padding: 1.5rem;
-        border-radius: 12px;
-        text-align: center;
-        font-size: 1.2rem;
+        font-size: 0.8rem;
         font-weight: 600;
+    }
+
+    .success-banner {
+        background: #ff0000;
+        color: #fff;
+        padding: 1.5rem;
+        border-radius: 12px;
+        text-align: center;
+        font-size: 1.3rem;
+        font-weight: 700;
         margin: 1rem 0;
     }
 
-    /* Sidebar styling */
-    [data-testid="stSidebar"] {
-        background: rgba(15, 12, 41, 0.95);
-    }
+    [data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #e0e0e0; }
+    [data-testid="stSidebar"] * { color: #282828 !important; }
 
-    /* Hide streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 
-    /* Button styling */
-    .stButton > button {
-        background: linear-gradient(90deg, #f9d423, #ff4e50);
-        color: #000;
-        font-weight: 700;
+    .stButton > button[kind="primary"] {
+        background: #ff0000 !important;
+        color: #fff !important;
         border: none;
-        border-radius: 8px;
-        padding: 0.6rem 2rem;
-        font-size: 1rem;
+        font-weight: 700;
     }
-    .stButton > button:hover {
-        opacity: 0.9;
+    .stButton > button {
+        border: 1px solid #d0d0d0;
+        border-radius: 20px;
+        font-weight: 600;
+        color: #282828;
     }
+    .stButton > button:hover { border-color: #ff0000; }
+
+    .stTabs [data-baseweb="tab"] { color: #606060; font-weight: 600; }
+    .stTabs [aria-selected="true"] { color: #ff0000 !important; border-bottom-color: #ff0000 !important; }
+
+    .stProgress > div > div > div > div { background-color: #ff0000; }
 </style>
 """, unsafe_allow_html=True)
+
+OUTPUT_DIR = Path("output")
 
 
 def run_async(coro):
@@ -139,10 +131,9 @@ def run_async(coro):
 
 def search_channel(query: str) -> list[dict]:
     """Search YouTube for channels matching the query."""
-    import subprocess
     try:
         result = subprocess.run(
-            ["yt-dlp", f"ytsearch5:{query} channel", "--dump-json", "--flat-playlist",
+            ["yt-dlp", f"ytsearch5:{query}", "--dump-json", "--flat-playlist",
              "--playlist-items", "1:5"],
             capture_output=True, text=True, timeout=30,
         )
@@ -156,13 +147,13 @@ def search_channel(query: str) -> list[dict]:
                 ch_url = data.get("channel_url") or data.get("uploader_url") or ""
                 ch_name = data.get("channel") or data.get("uploader") or ""
                 ch_id = data.get("channel_id") or data.get("uploader_id") or ""
-                if ch_url and ch_id not in seen:
+                if ch_url and ch_id and ch_id not in seen:
                     seen.add(ch_id)
                     matches.append({
                         "name": ch_name,
                         "url": ch_url,
                         "id": ch_id,
-                        "subscribers": data.get("channel_follower_count", ""),
+                        "subscribers": data.get("channel_follower_count"),
                     })
             except json.JSONDecodeError:
                 continue
@@ -171,58 +162,67 @@ def search_channel(query: str) -> list[dict]:
         return []
 
 
+def count_playlist_videos(playlist_id: str) -> int:
+    """Get actual video count for a playlist by fetching it directly."""
+    try:
+        result = subprocess.run(
+            ["yt-dlp", "--flat-playlist", "--dump-json",
+             f"https://www.youtube.com/playlist?list={playlist_id}"],
+            capture_output=True, text=True, timeout=60,
+        )
+        return len([l for l in result.stdout.strip().split("\n") if l.strip()])
+    except Exception:
+        return 0
+
+
 # --- Hero ---
 st.markdown("""
 <div class="hero">
-    <h1>channel2book</h1>
+    <h1>channel<span>2</span>book</h1>
     <p>Turn any YouTube channel into a beginner-friendly textbook</p>
 </div>
 """, unsafe_allow_html=True)
 
 # --- Sidebar ---
 with st.sidebar:
+    st.image("https://www.youtube.com/s/desktop/b3a5b6a2/img/favicon_144x144.png", width=40)
     st.markdown("### Settings")
 
     search_query = st.text_input(
         "Channel Name or URL",
         placeholder="3Blue1Brown",
-        help="Type a channel name (we'll find it) or paste a full URL",
+        help="Type a channel name or paste a URL",
     )
 
     channel_url = ""
+    channel_display_name = ""
 
     if search_query:
-        # Check if it's already a URL
         if "youtube.com" in search_query or "youtu.be" in search_query:
             channel_url = search_query
-            st.success(f"Using URL directly")
+            channel_display_name = search_query.split("/")[-1]
+            st.success(f"URL detected")
         else:
-            # Search for channel
-            if f"search_{search_query}" not in st.session_state:
-                with st.spinner(f"Searching for '{search_query}'..."):
-                    st.session_state[f"search_{search_query}"] = search_channel(search_query)
+            cache_key = f"search_{search_query}"
+            if cache_key not in st.session_state:
+                with st.spinner(f"Searching '{search_query}'..."):
+                    st.session_state[cache_key] = search_channel(search_query)
 
-            matches = st.session_state[f"search_{search_query}"]
+            matches = st.session_state[cache_key]
             if matches:
-                options = [f"{m['name']} ({m['url'].split('/')[-1]})" for m in matches]
-                selected = st.radio(
-                    "Select channel:",
-                    options,
-                    key=f"radio_{search_query}",
-                )
+                options = [f"{m['name']}" for m in matches]
+                selected = st.radio("Select channel:", options, key=f"radio_{search_query}")
                 idx = options.index(selected)
                 channel_url = matches[idx]["url"]
+                channel_display_name = matches[idx]["name"]
                 subs = matches[idx].get("subscribers")
-                info = f"**{matches[idx]['name']}**"
-                if subs:
-                    info += f" — {subs:,} subscribers" if isinstance(subs, int) else f" — {subs} subscribers"
-                st.markdown(info)
+                if subs and isinstance(subs, int):
+                    st.caption(f"{subs:,} subscribers")
             else:
-                st.warning("No channels found. Try a different name or paste the URL.")
+                st.warning("No channels found. Try a different name.")
 
     st.markdown("---")
-
-    max_videos = st.slider("Max Videos", 0, 100, 10, help="0 = unlimited")
+    max_videos = st.slider("Max Videos", 0, 200, 0, help="0 = all videos")
     budget = st.slider("Budget (USD)", 1.0, 50.0, 10.0, step=1.0)
     model = st.selectbox("Model", [
         "claude-sonnet-4-20250514",
@@ -230,237 +230,212 @@ with st.sidebar:
     ])
 
     st.markdown("---")
-    st.markdown("#### Filters")
-    playlist_filter = st.text_input("Playlist regex", ".*", help="Filter playlists by name")
-    skip_shorts = st.checkbox("Skip Shorts", True)
-    min_duration = st.number_input("Min duration (sec)", 0, 3600, 60)
-    skip_checker = st.checkbox("Skip faithfulness check", False)
-
-    st.markdown("---")
-    st.markdown("#### Output")
-    formats = st.multiselect("Formats", ["markdown", "epub", "pdf", "site"], default=["markdown"])
+    with st.expander("Advanced Filters"):
+        playlist_filter = st.text_input("Playlist regex", ".*")
+        skip_shorts = st.checkbox("Skip Shorts", True)
+        min_duration = st.number_input("Min duration (sec)", 0, 3600, 60)
+        skip_checker = st.checkbox("Skip faithfulness check", False)
+        formats = st.multiselect("Output formats", ["markdown", "epub", "pdf", "site"], default=["markdown"])
 
     has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     if not has_api_key:
-        st.warning("Set ANTHROPIC_API_KEY env var for LLM stages")
-
-    st.markdown("---")
-    st.markdown(
-        "<p style='color:#666;font-size:0.75rem;text-align:center;'>"
-        "Built with Claude | MIT License</p>",
-        unsafe_allow_html=True,
-    )
+        st.info("Set `ANTHROPIC_API_KEY` for LLM stages")
 
 
-# --- Main Tabs ---
-tab_build, tab_status, tab_browse = st.tabs(["Build", "Pipeline Status", "Browse Book"])
+# --- Main ---
+tab_build, tab_status, tab_browse = st.tabs(["Build", "Status", "Read Book"])
 
-OUTPUT_DIR = Path("output")
 
-# ============ BUILD TAB ============
 with tab_build:
-    col1, col2 = st.columns([2, 1])
+    if channel_url:
+        st.markdown(f"### {channel_display_name or channel_url}")
 
-    with col1:
-        if channel_url:
-            st.markdown(f"**Channel:** `{channel_url}`")
+        config = Config(
+            channel_url=channel_url,
+            filters=FilterConfig(
+                playlists=playlist_filter if 'playlist_filter' in dir() else ".*",
+                max_videos=max_videos,
+                skip_shorts=skip_shorts if 'skip_shorts' in dir() else True,
+                min_duration=min_duration if 'min_duration' in dir() else 60,
+            ),
+            llm=LLMConfig(model=model, budget_usd=budget),
+            output=OutputConfig(
+                formats=formats if 'formats' in dir() else ["markdown"],
+                output_dir=str(OUTPUT_DIR),
+            ),
+        )
 
-            # Build config
-            config = Config(
-                channel_url=channel_url,
-                filters=FilterConfig(
-                    playlists=playlist_filter,
-                    max_videos=max_videos,
-                    skip_shorts=skip_shorts,
-                    min_duration=min_duration,
-                ),
-                llm=LLMConfig(model=model, budget_usd=budget),
-                output=OutputConfig(formats=formats, output_dir=str(OUTPUT_DIR)),
-            )
+        c1, c2 = st.columns(2)
+        dry_run = c1.button("Preview & Estimate Cost", use_container_width=True)
+        full_run = c2.button("Build Textbook", use_container_width=True, type="primary")
 
-            c1, c2, c3 = st.columns(3)
-            dry_run = c1.button("Dry Run", use_container_width=True, help="Estimate cost only")
-            full_run = c2.button("Build Book", use_container_width=True, type="primary")
-            view_status = c3.button("Refresh Status", use_container_width=True)
+        if dry_run:
+            config.dry_run = True
+            config.skip_checker = skip_checker if 'skip_checker' in dir() else False
 
-            if dry_run:
-                config.dry_run = True
-                config.skip_checker = skip_checker
+            with st.spinner("Discovering playlists & videos..."):
+                from channel2book.stages.discovery import run_discovery
 
-                with st.spinner("Discovering channel..."):
-                    from channel2book.stages.discovery import run_discovery
-                    from channel2book.db import Database
+                OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                db = Database(OUTPUT_DIR / "channel2book.db")
+                run_async(db.connect())
+                try:
+                    channel_id = run_async(run_discovery(config, db))
 
-                    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-                    db = Database(OUTPUT_DIR / "channel2book.db")
-                    run_async(db.connect())
-                    try:
-                        channel_id = run_async(run_discovery(config, db))
-                        all_videos = run_async(db.get_videos(channel_id=channel_id, included_only=True))
-                        playlists = run_async(db.get_playlists(channel_id))
+                    # Get ALL videos (not filtered) for accurate counts
+                    all_videos = run_async(db.get_videos(channel_id=channel_id, included_only=False))
+                    included_videos = [v for v in all_videos if v.is_included]
+                    playlists = run_async(db.get_playlists(channel_id))
 
-                        # Stats cards
-                        sc1, sc2, sc3, sc4 = st.columns(4)
-                        sc1.markdown(f'<div class="stat-card"><h3>{len(all_videos)}</h3><p>Videos</p></div>', unsafe_allow_html=True)
-                        sc2.markdown(f'<div class="stat-card"><h3>{len(playlists)}</h3><p>Chapters</p></div>', unsafe_allow_html=True)
+                    total_video_count = len(all_videos)
+                    included_count = len(included_videos)
 
-                        avg_tokens = 5000
-                        est = estimate_pipeline_cost(avg_tokens * len(all_videos), model, len(all_videos))
-                        sc3.markdown(f'<div class="stat-card"><h3>{format_cost(est["total"])}</h3><p>Est. Cost</p></div>', unsafe_allow_html=True)
-                        sc4.markdown(f'<div class="stat-card"><h3>{model.split("-")[1]}</h3><p>Model</p></div>', unsafe_allow_html=True)
+                finally:
+                    run_async(db.close())
 
-                        # Cost breakdown
-                        st.markdown("#### Cost Breakdown")
-                        cost_data = {k: f"${v:.4f}" for k, v in est.items()}
-                        st.json(cost_data)
+            # Stats row
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1.markdown(f'<div class="stat-card"><h3>{total_video_count}</h3><p>Total Videos</p></div>', unsafe_allow_html=True)
+            sc2.markdown(f'<div class="stat-card"><h3>{len(playlists)}</h3><p>Playlists</p></div>', unsafe_allow_html=True)
 
-                        # Playlist list
-                        st.markdown("#### Playlists (Chapters)")
-                        for i, pl in enumerate(playlists[:20]):
-                            vids = run_async(db.get_videos(playlist_id=pl.id, included_only=True))
-                            st.markdown(f"**{i+1}.** {pl.title} — _{len(vids)} videos_")
-                        if len(playlists) > 20:
-                            st.caption(f"... and {len(playlists) - 20} more")
+            est = estimate_pipeline_cost(5000 * included_count, model, included_count)
+            sc3.markdown(f'<div class="stat-card"><h3>{format_cost(est["total"])}</h3><p>Est. Cost</p></div>', unsafe_allow_html=True)
 
-                    finally:
-                        run_async(db.close())
+            if max_videos > 0:
+                sc4.markdown(f'<div class="stat-card"><h3>{included_count}</h3><p>Will Process</p></div>', unsafe_allow_html=True)
+            else:
+                sc4.markdown(f'<div class="stat-card"><h3>{included_count}</h3><p>To Process</p></div>', unsafe_allow_html=True)
 
-            elif full_run:
-                if not has_api_key:
-                    st.error("Set ANTHROPIC_API_KEY environment variable first!")
-                else:
-                    config.dry_run = False
-                    config.skip_checker = skip_checker
+            # Cost table
+            st.markdown("---")
+            cost_col1, cost_col2 = st.columns(2)
+            with cost_col1:
+                st.markdown("#### Cost Estimate")
+                for stage, cost in est.items():
+                    if stage != "total":
+                        st.markdown(f"- **{stage.title()}**: {format_cost(cost)}")
+                st.markdown(f"- **Total**: **{format_cost(est['total'])}**")
+                st.caption(f"Budget limit: {format_cost(budget)}")
 
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    log_area = st.empty()
-                    logs = []
-
-                    stages = [
-                        ("Stage 1/5: Discovery", 0.1),
-                        ("Stage 2/5: Transcripts", 0.3),
-                        ("Stage 3/5: Writer", 0.7),
-                        ("Stage 4/5: Checker", 0.85),
-                        ("Stage 5/5: Output", 0.95),
-                    ]
-
-                    try:
-                        from channel2book.pipeline import run_pipeline
-
-                        status_text.markdown("**Running full pipeline...**")
-
-                        # Run pipeline
-                        run_async(run_pipeline(config))
-
-                        progress_bar.progress(1.0)
-                        status_text.empty()
-
+            # Playlists with REAL video counts
+            with cost_col2:
+                st.markdown("#### Playlists (Chapters)")
+                # Use DB to get accurate per-playlist counts (all videos, not just included)
+                db2 = Database(OUTPUT_DIR / "channel2book.db")
+                run_async(db2.connect())
+                try:
+                    for i, pl in enumerate(playlists[:25]):
+                        all_pl_vids = run_async(db2.get_videos(playlist_id=pl.id, included_only=False))
+                        count = len(all_pl_vids)
                         st.markdown(
-                            '<div class="success-banner">'
-                            'Your textbook is ready! 📖<br>'
-                            '<small>Aapki kitaab tayyar hai!</small>'
-                            '</div>',
+                            f'<div class="playlist-row">'
+                            f'<span class="pl-title">{i+1}. {pl.title}</span>'
+                            f'<span class="pl-count">{count} videos</span>'
+                            f'</div>',
                             unsafe_allow_html=True,
                         )
+                    if len(playlists) > 25:
+                        st.caption(f"+ {len(playlists) - 25} more playlists")
+                finally:
+                    run_async(db2.close())
 
-                        # Show output files
-                        book_dir = OUTPUT_DIR / "book"
-                        if book_dir.exists():
-                            md_files = list(book_dir.rglob("*.md"))
-                            st.success(f"Generated {len(md_files)} markdown files in `{book_dir}/`")
+            if max_videos > 0 and max_videos < total_video_count:
+                st.info(f"Processing limited to **{max_videos}** videos (set Max Videos to 0 for all)")
 
-                    except Exception as e:
-                        st.error(f"Pipeline error: {e}")
+        elif full_run:
+            if not has_api_key:
+                st.error("Set `ANTHROPIC_API_KEY` environment variable first!")
+            else:
+                config.dry_run = False
+                config.skip_checker = skip_checker if 'skip_checker' in dir() else False
 
-        else:
-            st.info("Enter a YouTube channel URL in the sidebar to get started.")
+                status_text = st.empty()
+                progress_bar = st.progress(0)
 
-            # Show example
-            st.markdown("#### Example")
-            st.code("channel2book build https://www.youtube.com/@3Blue1Brown --max-videos 10 --dry-run", language="bash")
+                try:
+                    from channel2book.pipeline import run_pipeline
+                    status_text.markdown("**Running pipeline...**")
+                    run_async(run_pipeline(config))
+                    progress_bar.progress(1.0)
+                    status_text.empty()
 
-    with col2:
-        st.markdown("#### How It Works")
+                    st.markdown(
+                        '<div class="success-banner">'
+                        'Your textbook is ready! 📖<br>'
+                        'Aapki kitaab tayyar hai — ab padho aur seekho!'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    book_dir = OUTPUT_DIR / "book"
+                    if book_dir.exists():
+                        md_count = len(list(book_dir.rglob("*.md")))
+                        st.success(f"Generated {md_count} sections in `{book_dir}/`")
+
+                except Exception as e:
+                    st.error(f"Pipeline error: {e}")
+    else:
         st.markdown("""
-        1. **Discovery** — Finds all playlists & videos
-        2. **Transcripts** — Fetches captions (3-tier fallback)
-        3. **Writer** — Claude writes each section
-        4. **Checker** — Verifies claims vs transcript
-        5. **Output** — Markdown, EPUB, PDF, Website
+        ### How to use
+        1. Type a **channel name** in the sidebar (e.g. `3Blue1Brown`)
+        2. Select the matching channel
+        3. Click **Preview & Estimate Cost** to see playlists and pricing
+        4. Click **Build Textbook** to generate your book
+
+        ```bash
+        # Or use the CLI:
+        channel2book build https://www.youtube.com/@3Blue1Brown --max-videos 10 --dry-run
+        ```
         """)
 
-        st.markdown("#### Output")
-        st.markdown("""
-        ```
-        output/
-        ├── book/
-        │   ├── 00-preface/
-        │   ├── 01-chapter/
-        │   │   ├── 00-intro.md
-        │   │   ├── 01-section.md
-        │   │   └── 99-summary.md
-        │   └── ZZ-glossary/
-        ├── channel2book.epub
-        └── quality-report.json
-        ```
-        """)
 
-
-# ============ STATUS TAB ============
 with tab_status:
     db_path = OUTPUT_DIR / "channel2book.db"
     if db_path.exists():
         db = Database(db_path)
         run_async(db.connect())
-
         try:
             summary = run_async(db.get_stage_summary())
             total_cost = run_async(db.get_total_cost())
             costs_by_stage = run_async(db.get_cost_by_stage())
 
             if summary:
-                # Stage progress
                 st.markdown("#### Pipeline Progress")
-
                 for stage, counts in summary.items():
                     done = counts.get("done", 0)
                     total = sum(counts.values())
+                    failed = counts.get("failed", 0)
                     pct = done / total if total > 0 else 0
 
-                    col_a, col_b = st.columns([3, 1])
-                    col_a.progress(pct, text=f"{stage}: {done}/{total}")
-                    status_emoji = "✅" if pct == 1.0 else ("🔄" if counts.get("running", 0) > 0 else "⏳")
-                    col_b.markdown(f"### {status_emoji}")
+                    label = f"{stage}: {done}/{total}"
+                    if failed:
+                        label += f" ({failed} failed)"
+                    st.progress(pct, text=label)
 
-                # Cost
                 st.markdown("---")
-                cc1, cc2 = st.columns(2)
-                cc1.metric("Total Cost", format_cost(total_cost))
+                mc1, mc2 = st.columns(2)
+                mc1.metric("Total Cost", format_cost(total_cost))
+                mc2.metric("Budget", format_cost(budget))
 
                 if costs_by_stage:
-                    cc2.markdown("**Cost by Stage**")
+                    st.markdown("**Cost by stage:**")
                     for stage, cost in costs_by_stage.items():
-                        cc2.markdown(f"- {stage}: {format_cost(cost)}")
+                        st.markdown(f"- {stage}: {format_cost(cost)}")
             else:
-                st.info("No pipeline data yet. Run a build first.")
-
+                st.info("No pipeline data yet.")
         finally:
             run_async(db.close())
     else:
         st.info("No pipeline database found. Run a build first.")
 
 
-# ============ BROWSE TAB ============
 with tab_browse:
     book_dir = OUTPUT_DIR / "book"
     if book_dir.exists():
-        # List all chapters
         chapters = sorted([d for d in book_dir.iterdir() if d.is_dir()])
-
         if chapters:
             chapter_names = [d.name for d in chapters]
-            selected_chapter = st.selectbox("Select Chapter", chapter_names)
+            selected_chapter = st.selectbox("Chapter", chapter_names)
 
             if selected_chapter:
                 chapter_path = book_dir / selected_chapter
@@ -468,40 +443,28 @@ with tab_browse:
 
                 if md_files:
                     file_names = [f.stem for f in md_files]
-                    selected_file = st.selectbox("Select Section", file_names)
+                    selected_file = st.selectbox("Section", file_names)
 
                     if selected_file:
-                        file_path = chapter_path / f"{selected_file}.md"
-                        content = file_path.read_text()
-
-                        # Strip frontmatter
+                        content = (chapter_path / f"{selected_file}.md").read_text()
                         if content.startswith("---"):
                             end = content.find("---", 3)
                             if end > 0:
                                 content = content[end + 3:].strip()
-
                         st.markdown(content)
                 else:
-                    st.info("No sections found in this chapter.")
+                    st.info("No sections in this chapter.")
         else:
-            st.info("No chapters generated yet.")
+            st.info("No chapters yet. Build a book first.")
     else:
-        st.info("No book output found. Run a build first.")
+        st.info("No book output. Build a book first.")
 
-    # Quality report
     report_path = OUTPUT_DIR / "quality-report.json"
     if report_path.exists():
         st.markdown("---")
         st.markdown("#### Quality Report")
         report = json.loads(report_path.read_text())
         qc1, qc2, qc3 = st.columns(3)
-        qc1.metric("Total Claims", report.get("total_claims", 0))
-        qc2.metric("Supported", report.get("supported", 0))
+        qc1.metric("Claims", report.get("total_claims", 0))
+        qc2.metric("Verified", report.get("supported", 0))
         qc3.metric("Fidelity", f"{report.get('support_rate', 0):.0%}")
-
-        flagged = report.get("flagged_claims", [])
-        if flagged:
-            st.warning(f"{len(flagged)} claims flagged as unverified")
-            with st.expander("View flagged claims"):
-                for c in flagged:
-                    st.markdown(f"- _{c['claim']}_ (confidence: {c.get('confidence', 0):.0%})")
