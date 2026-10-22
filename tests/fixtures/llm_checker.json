@@ -1,0 +1,10 @@
+{
+  "claims_response": {
+    "content": [{"type": "text", "text": "[\"Neural networks are computational models inspired by the brain\", \"They consist of layers of interconnected nodes called neurons\", \"Backpropagation is used to adjust weights during training\"]"}],
+    "usage": {"input_tokens": 200, "output_tokens": 50}
+  },
+  "verify_response": {
+    "content": [{"type": "text", "text": "{\"supported\": true, \"transcript_span\": \"A neural network is a computational model inspired by the brain\", \"confidence\": 0.95, \"reasoning\": \"Direct match in transcript\"}"}],
+    "usage": {"input_tokens": 300, "output_tokens": 40}
+  }
+}

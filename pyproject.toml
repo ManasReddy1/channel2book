@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Turn a YouTube channel into a beginner-friendly textbook."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 authors = [{ name = "Manas Reddy" }]
 keywords = ["youtube", "textbook", "llm", "education"]
 classifiers = [
@@ -26,6 +26,7 @@ dependencies = [
     "pydantic>=2.0",
     "aiosqlite>=0.19",
     "jinja2>=3.1",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -50,5 +51,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py39"
 line-length = 100
