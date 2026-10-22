@@ -1,0 +1,27 @@
+# channel2book configuration
+# Copy to channel2book.toml and edit
+
+[channel]
+url = "https://www.youtube.com/@aiDotEngineer"
+
+[filters]
+# playlists = ".*"          # regex to include playlists (default: all)
+# max_videos = 0            # 0 = unlimited
+# since = "2020-01-01"      # only videos after this date
+# min_duration = 60         # skip videos shorter than N seconds
+# skip_shorts = true        # skip YouTube Shorts
+
+[llm]
+model = "claude-sonnet-4-20250514"
+# haiku_model = "claude-haiku-4-5-20251001"  # for checker stage
+# max_concurrent = 5        # parallel LLM calls
+# budget_usd = 10.0         # stop if cost exceeds this
+
+[output]
+# formats = ["markdown", "epub", "site"]
+# output_dir = "output"
+# book_title = ""           # auto-detected from channel name if empty
+
+[whisper]
+# enabled = false
+# model_size = "base"       # tiny, base, small, medium, large-v3
