@@ -59,6 +59,7 @@ class Config(BaseModel):
     dry_run: bool = False
     skip_checker: bool = False
     resume: bool = True  # resume from last state by default
+    selected_playlists: Optional[list[str]] = None  # None = all playlists
 
 
 def load_config(

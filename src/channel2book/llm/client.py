@@ -1,22 +1,32 @@
-"""Anthropic SDK wrapper with retries, cost tracking, and budget enforcement."""
+"""Multi-provider LLM client via litellm — supports Claude, GPT, Gemini, Ollama, and 100+ models."""
 
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime
 from typing import Optional
 
-from anthropic import Anthropic, APIError, RateLimitError
+import litellm
 
-from channel2book.constants import MODEL_PRICING
 from channel2book.db import Database
 from channel2book.models import BudgetEntry
-from channel2book.utils.cost import estimate_cost
+
+# Suppress litellm debug logs
+litellm.suppress_debug_info = True
 
 
 class LLMClient:
-    """Wrapper around Anthropic API with retries and cost tracking."""
+    """Universal LLM client with retries and cost tracking.
+
+    Supports any model via litellm:
+      - claude-sonnet-4-20250514     (Anthropic)
+      - claude-haiku-4-5-20251001    (Anthropic)
+      - gpt-4o-mini                  (OpenAI)
+      - gemini/gemini-2.0-flash      (Google)
+      - deepseek/deepseek-chat       (DeepSeek)
+      - ollama/llama3.1:8b           (Local, free)
+      - ollama/qwen2.5:14b           (Local, free)
+    """
 
     def __init__(
         self,
@@ -24,7 +34,6 @@ class LLMClient:
         model: str = "claude-sonnet-4-20250514",
         budget_usd: float = 10.0,
     ):
-        self._client = Anthropic()
         self._db = db
         self.model = model
         self.budget_usd = budget_usd
@@ -39,6 +48,9 @@ class LLMClient:
         return self._total_cost
 
     def is_over_budget(self) -> bool:
+        # Local models (ollama) have no cost — never over budget
+        if self.model.startswith("ollama/"):
+            return False
         return self._total_cost >= self.budget_usd
 
     async def complete(
@@ -52,9 +64,9 @@ class LLMClient:
         video_id: str = "",
         max_retries: int = 3,
     ) -> str:
-        """Send a message to Claude and return the text response.
+        """Send a prompt to any LLM and return the text response.
 
-        Handles retries with exponential backoff and logs cost to DB.
+        Works with Claude, GPT, Gemini, DeepSeek, Ollama, and 100+ models.
         """
         if self.is_over_budget():
             raise BudgetExceededError(
@@ -62,24 +74,32 @@ class LLMClient:
             )
 
         use_model = model or self.model
-        messages = [{"role": "user", "content": prompt}]
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
         for attempt in range(max_retries):
             try:
-                kwargs = {
-                    "model": use_model,
-                    "max_tokens": max_tokens,
-                    "messages": messages,
-                }
-                if system:
-                    kwargs["system"] = system
+                response = litellm.completion(
+                    model=use_model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                )
 
-                response = self._client.messages.create(**kwargs)
+                # Extract response text
+                text = response.choices[0].message.content
 
-                # Track cost
-                input_tokens = response.usage.input_tokens
-                output_tokens = response.usage.output_tokens
-                cost = estimate_cost(input_tokens, output_tokens, use_model)
+                # Track cost (litellm calculates it for known models)
+                input_tokens = response.usage.prompt_tokens or 0
+                output_tokens = response.usage.completion_tokens or 0
+
+                try:
+                    cost = litellm.completion_cost(completion_response=response)
+                except Exception:
+                    # Fallback: estimate for unknown models (local etc.)
+                    cost = 0.0
+
                 self._total_cost += cost
 
                 entry = BudgetEntry(
@@ -92,16 +112,17 @@ class LLMClient:
                 )
                 await self._db.log_cost(entry)
 
-                return response.content[0].text
+                return text
 
-            except RateLimitError:
-                wait = (2 ** attempt) + 1
-                await asyncio.sleep(wait)
-
-            except APIError as e:
-                if attempt == max_retries - 1:
+            except Exception as e:
+                error_str = str(e).lower()
+                if "rate" in error_str and "limit" in error_str:
+                    wait = (2 ** attempt) + 1
+                    await asyncio.sleep(wait)
+                elif attempt == max_retries - 1:
                     raise
-                await asyncio.sleep(2 ** attempt)
+                else:
+                    await asyncio.sleep(2 ** attempt)
 
         raise RuntimeError(f"Failed after {max_retries} retries")
 

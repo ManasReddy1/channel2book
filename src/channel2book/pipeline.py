@@ -43,6 +43,10 @@ async def run_pipeline(config: Config) -> None:
         print_header("Stage 1/5: Discovery")
         channel_id = await run_discovery(config, db)
 
+        # Apply playlist selection filter (from web UI)
+        if config.selected_playlists is not None:
+            await _apply_playlist_selection(db, channel_id, config.selected_playlists)
+
         if is_cancelled():
             print_warning("Interrupted after discovery.")
             return
@@ -216,6 +220,23 @@ async def _count_transcript_tokens(db: Database, channel_id: str) -> int:
         row = await cur.fetchone()
         total = row["total"] if row else 0
     return total
+
+
+async def _apply_playlist_selection(
+    db: Database, channel_id: str, selected_ids: list[str]
+) -> None:
+    """Mark playlists and their videos as included/excluded based on user selection."""
+    all_playlists = await db.get_playlists(channel_id, included_only=False)
+    for pl in all_playlists:
+        is_selected = pl.id in selected_ids
+        if pl.is_included != is_selected:
+            pl.is_included = is_selected
+            await db.upsert_playlist(pl)
+            # Update all videos in this playlist
+            videos = await db.get_videos(playlist_id=pl.id, included_only=False)
+            for v in videos:
+                v.is_included = is_selected
+                await db.upsert_video(v)
 
 
 def _print_completion_banner(config: Config, output_dir: Path, total_cost: float) -> None:

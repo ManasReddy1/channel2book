@@ -17,6 +17,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from channel2book.config import Config, FilterConfig, LLMConfig, OutputConfig
+from channel2book.constants import AVAILABLE_MODELS, MODEL_PRICING
 from channel2book.db import Database
 from channel2book.utils.cost import estimate_pipeline_cost, format_cost
 
@@ -224,10 +225,38 @@ with st.sidebar:
     st.markdown("---")
     max_videos = st.slider("Max Videos", 0, 200, 0, help="0 = all videos")
     budget = st.slider("Budget (USD)", 1.0, 50.0, 10.0, step=1.0)
-    model = st.selectbox("Model", [
-        "claude-sonnet-4-20250514",
-        "claude-haiku-4-5-20251001",
-    ])
+
+    # Model selector with pricing info
+    model_labels = []
+    for m in AVAILABLE_MODELS:
+        p = MODEL_PRICING.get(m, {})
+        inp = p.get("input", 0)
+        if inp == 0:
+            model_labels.append(f"{m}  (FREE - local)")
+        else:
+            model_labels.append(f"{m}  (${inp:.2f}/${p.get('output', 0):.2f} per 1M)")
+    selected_label = st.selectbox("Model", model_labels)
+    model = AVAILABLE_MODELS[model_labels.index(selected_label)]
+
+    # Show provider-specific API key hint
+    if model.startswith("ollama/"):
+        st.success("Local model — no API key needed")
+    elif model.startswith("gemini/"):
+        has_key = bool(os.environ.get("GEMINI_API_KEY"))
+        if not has_key:
+            st.info("Set `GEMINI_API_KEY` env var")
+    elif model.startswith("deepseek/"):
+        has_key = bool(os.environ.get("DEEPSEEK_API_KEY"))
+        if not has_key:
+            st.info("Set `DEEPSEEK_API_KEY` env var")
+    elif "gpt" in model:
+        has_key = bool(os.environ.get("OPENAI_API_KEY"))
+        if not has_key:
+            st.info("Set `OPENAI_API_KEY` env var")
+    else:
+        has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        if not has_key:
+            st.info("Set `ANTHROPIC_API_KEY` env var")
 
     st.markdown("---")
     with st.expander("Advanced Filters"):
@@ -236,10 +265,6 @@ with st.sidebar:
         min_duration = st.number_input("Min duration (sec)", 0, 3600, 60)
         skip_checker = st.checkbox("Skip faithfulness check", False)
         formats = st.multiselect("Output formats", ["markdown", "epub", "pdf", "site"], default=["markdown"])
-
-    has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    if not has_api_key:
-        st.info("Set `ANTHROPIC_API_KEY` for LLM stages")
 
 
 # --- Main ---
@@ -285,7 +310,7 @@ with tab_build:
                     # Get ALL videos (not filtered) for accurate counts
                     all_videos = run_async(db.get_videos(channel_id=channel_id, included_only=False))
                     included_videos = [v for v in all_videos if v.is_included]
-                    playlists = run_async(db.get_playlists(channel_id))
+                    playlists = run_async(db.get_playlists(channel_id, included_only=False))
 
                     total_video_count = len(all_videos)
                     included_count = len(included_videos)
@@ -317,25 +342,59 @@ with tab_build:
                 st.markdown(f"- **Total**: **{format_cost(est['total'])}**")
                 st.caption(f"Budget limit: {format_cost(budget)}")
 
-            # Playlists with REAL video counts
+            # Playlists with REAL video counts + multi-select
             with cost_col2:
                 st.markdown("#### Playlists (Chapters)")
-                # Use DB to get accurate per-playlist counts (all videos, not just included)
+                st.caption("Select which playlists to include:")
                 db2 = Database(OUTPUT_DIR / "channel2book.db")
                 run_async(db2.connect())
                 try:
-                    for i, pl in enumerate(playlists[:25]):
+                    playlist_data = []
+                    for pl in playlists:
                         all_pl_vids = run_async(db2.get_videos(playlist_id=pl.id, included_only=False))
-                        count = len(all_pl_vids)
-                        st.markdown(
-                            f'<div class="playlist-row">'
-                            f'<span class="pl-title">{i+1}. {pl.title}</span>'
-                            f'<span class="pl-count">{count} videos</span>'
-                            f'</div>',
-                            unsafe_allow_html=True,
+                        playlist_data.append((pl, len(all_pl_vids)))
+
+                    # Store playlist data in session state for the build step
+                    if "playlist_data" not in st.session_state:
+                        st.session_state["playlist_data"] = {}
+
+                    # Select All / Deselect All buttons
+                    sel_c1, sel_c2 = st.columns(2)
+                    if sel_c1.button("Select All", key="sel_all", use_container_width=True):
+                        for pl, _ in playlist_data:
+                            st.session_state[f"pl_{pl.id}"] = True
+                    if sel_c2.button("Deselect All", key="desel_all", use_container_width=True):
+                        for pl, _ in playlist_data:
+                            st.session_state[f"pl_{pl.id}"] = False
+
+                    selected_playlists = []
+                    for i, (pl, count) in enumerate(playlist_data[:50]):
+                        key = f"pl_{pl.id}"
+                        # Default to selected
+                        if key not in st.session_state:
+                            st.session_state[key] = True
+                        checked = st.checkbox(
+                            f"{pl.title}  ({count} videos)",
+                            key=key,
                         )
-                    if len(playlists) > 25:
-                        st.caption(f"+ {len(playlists) - 25} more playlists")
+                        if checked:
+                            selected_playlists.append(pl.id)
+
+                    if len(playlists) > 50:
+                        st.caption(f"+ {len(playlists) - 50} more playlists")
+
+                    # Store selected playlist IDs for the build step
+                    st.session_state["selected_playlists"] = selected_playlists
+
+                    selected_vid_count = 0
+                    for pl, count in playlist_data:
+                        if pl.id in selected_playlists:
+                            selected_vid_count += count
+
+                    st.markdown(
+                        f"**{len(selected_playlists)}/{len(playlists)}** playlists selected "
+                        f"(**{selected_vid_count}** videos)"
+                    )
                 finally:
                     run_async(db2.close())
 
@@ -343,11 +402,27 @@ with tab_build:
                 st.info(f"Processing limited to **{max_videos}** videos (set Max Videos to 0 for all)")
 
         elif full_run:
-            if not has_api_key:
-                st.error("Set `ANTHROPIC_API_KEY` environment variable first!")
+            # Check if API key is available for the selected model
+            needs_key = True
+            key_name = "ANTHROPIC_API_KEY"
+            if model.startswith("ollama/"):
+                needs_key = False
+            elif model.startswith("gemini/"):
+                key_name = "GEMINI_API_KEY"
+            elif model.startswith("deepseek/"):
+                key_name = "DEEPSEEK_API_KEY"
+            elif "gpt" in model:
+                key_name = "OPENAI_API_KEY"
+
+            if needs_key and not os.environ.get(key_name):
+                st.error(f"Set `{key_name}` environment variable first!")
             else:
                 config.dry_run = False
                 config.skip_checker = skip_checker if 'skip_checker' in dir() else False
+
+                # Apply playlist selection if available
+                if "selected_playlists" in st.session_state:
+                    config.selected_playlists = st.session_state["selected_playlists"]
 
                 status_text = st.empty()
                 progress_bar = st.progress(0)

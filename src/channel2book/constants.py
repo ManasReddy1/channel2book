@@ -1,16 +1,26 @@
 """Model pricing, defaults, and constants."""
 
-# Claude model pricing (USD per million tokens) as of 2025
+# Model pricing (USD per million tokens)
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-20250514": {
-        "input": 3.00,
-        "output": 15.00,
-    },
-    "claude-haiku-4-5-20251001": {
-        "input": 0.80,
-        "output": 4.00,
-    },
+    # Anthropic
+    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
+    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
+    # OpenAI
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    # Google
+    "gemini/gemini-2.0-flash": {"input": 0.075, "output": 0.30},
+    "gemini/gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    # DeepSeek
+    "deepseek/deepseek-chat": {"input": 0.27, "output": 1.10},
+    # Local (free)
+    "ollama/llama3.1:8b": {"input": 0.0, "output": 0.0},
+    "ollama/qwen2.5:14b": {"input": 0.0, "output": 0.0},
+    "ollama/qwen2.5:32b": {"input": 0.0, "output": 0.0},
 }
+
+# All available models for UI dropdowns
+AVAILABLE_MODELS = list(MODEL_PRICING.keys())
 
 # Defaults
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
