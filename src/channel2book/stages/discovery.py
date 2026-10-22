@@ -191,13 +191,13 @@ def _extract_playlist_videos(playlist_id: str, channel_id: str) -> list[Video]:
                     id=vid,
                     playlist_id=playlist_id,
                     channel_id=channel_id,
-                    title=data.get("title", "Untitled"),
-                    description=data.get("description", ""),
+                    title=data.get("title") or "Untitled",
+                    description=data.get("description") or "",
                     duration_seconds=int(duration) if duration else 0,
-                    upload_date=data.get("upload_date", ""),
-                    is_short=int(duration or 0) < 62 and "#shorts" in data.get("title", "").lower(),
+                    upload_date=data.get("upload_date") or "",
+                    is_short=int(duration or 0) < 62 and "#shorts" in (data.get("title") or "").lower(),
                 ))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, Exception):
             continue
 
     return videos

@@ -32,7 +32,10 @@ async def run_pipeline(config: Config) -> None:
     """Run the full 5-stage pipeline."""
     setup_signal_handler()
 
-    db = Database(Path(config.output.output_dir) / "channel2book.db")
+    output_path = Path(config.output.output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    db = Database(output_path / "channel2book.db")
     await db.connect()
 
     try:
