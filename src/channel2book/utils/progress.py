@@ -30,7 +30,15 @@ def is_cancelled() -> bool:
 
 
 def setup_signal_handler() -> None:
-    """Install Ctrl-C handler that sets cancellation flag."""
+    """Install Ctrl-C handler that sets cancellation flag.
+
+    Silently skips if not running in the main thread (e.g. Streamlit).
+    """
+    import threading
+
+    if threading.current_thread() is not threading.main_thread():
+        return
+
     def _handler(sig, frame):
         global _cancelled
         if _cancelled:
