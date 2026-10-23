@@ -251,25 +251,30 @@ with st.sidebar:
     selected_label = st.selectbox("Model", model_labels)
     model = AVAILABLE_MODELS[model_labels.index(selected_label)]
 
-    # Show provider-specific API key hint
+    # Determine which API key is needed for the selected model
+    _key_name = ""
     if model.startswith("ollama/"):
         st.success("Local model — no API key needed")
     elif model.startswith("gemini/"):
-        has_key = bool(os.environ.get("GEMINI_API_KEY"))
-        if not has_key:
-            st.info("Set `GEMINI_API_KEY` env var")
+        _key_name = "GEMINI_API_KEY"
     elif model.startswith("deepseek/"):
-        has_key = bool(os.environ.get("DEEPSEEK_API_KEY"))
-        if not has_key:
-            st.info("Set `DEEPSEEK_API_KEY` env var")
+        _key_name = "DEEPSEEK_API_KEY"
     elif "gpt" in model:
-        has_key = bool(os.environ.get("OPENAI_API_KEY"))
-        if not has_key:
-            st.info("Set `OPENAI_API_KEY` env var")
+        _key_name = "OPENAI_API_KEY"
     else:
-        has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-        if not has_key:
-            st.info("Set `ANTHROPIC_API_KEY` env var")
+        _key_name = "ANTHROPIC_API_KEY"
+
+    # API key input — let users paste it directly
+    if _key_name:
+        existing_key = os.environ.get(_key_name, "")
+        api_key_input = st.text_input(
+            f"{_key_name}",
+            value=existing_key,
+            type="password",
+            help=f"Paste your API key here or set ${_key_name} in your terminal",
+        )
+        if api_key_input:
+            os.environ[_key_name] = api_key_input
 
     st.markdown("---")
     with st.expander("Advanced Filters"):
@@ -420,20 +425,8 @@ with tab_build:
                 st.info(f"Processing limited to **{max_videos}** videos (set Max Videos to 0 for all)")
 
         if full_run:
-            # Check if API key is available for the selected model
-            needs_key = True
-            key_name = "ANTHROPIC_API_KEY"
-            if model.startswith("ollama/"):
-                needs_key = False
-            elif model.startswith("gemini/"):
-                key_name = "GEMINI_API_KEY"
-            elif model.startswith("deepseek/"):
-                key_name = "DEEPSEEK_API_KEY"
-            elif "gpt" in model:
-                key_name = "OPENAI_API_KEY"
-
-            if needs_key and not os.environ.get(key_name):
-                st.error(f"Set `{key_name}` environment variable first!")
+            if _key_name and not os.environ.get(_key_name):
+                st.error(f"Paste your `{_key_name}` in the sidebar first!")
             else:
                 config.dry_run = False
                 config.skip_checker = skip_checker if 'skip_checker' in dir() else False
