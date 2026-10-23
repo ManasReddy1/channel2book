@@ -307,6 +307,7 @@ with tab_build:
         dry_run = c1.button("Preview & Estimate Cost", use_container_width=True)
         full_run = c2.button("Build Textbook", use_container_width=True, type="primary")
 
+        # Run discovery when button is clicked, store results in session_state
         if dry_run:
             config.dry_run = True
             config.skip_checker = skip_checker if 'skip_checker' in dir() else False
@@ -320,21 +321,41 @@ with tab_build:
                 try:
                     channel_id = run_async(run_discovery(config, db))
 
-                    # Get ALL videos (not filtered) for accurate counts
                     all_videos = run_async(db.get_videos(channel_id=channel_id, included_only=False))
                     included_videos = [v for v in all_videos if v.is_included]
                     playlists = run_async(db.get_playlists(channel_id, included_only=False))
 
-                    total_video_count = len(all_videos)
-                    included_count = len(included_videos)
+                    # Get per-playlist video counts
+                    playlist_data = []
+                    for pl in playlists:
+                        pl_vids = run_async(db.get_videos(playlist_id=pl.id, included_only=False))
+                        playlist_data.append({"id": pl.id, "title": pl.title, "count": len(pl_vids)})
+
+                    # Save everything to session_state so it survives reruns
+                    st.session_state["discovery"] = {
+                        "channel_url": channel_url,
+                        "total_videos": len(all_videos),
+                        "included_count": len(included_videos),
+                        "playlists": playlist_data,
+                    }
+                    # Initialize all playlist checkboxes to selected
+                    for pd in playlist_data:
+                        st.session_state[f"pl_{pd['id']}"] = True
 
                 finally:
                     run_async(db.close())
 
+        # Show results if we have discovery data (persists across checkbox clicks)
+        discovery = st.session_state.get("discovery")
+        if discovery and discovery.get("channel_url") == channel_url and not full_run:
+            total_video_count = discovery["total_videos"]
+            included_count = discovery["included_count"]
+            playlist_data = discovery["playlists"]
+
             # Stats row
             sc1, sc2, sc3, sc4 = st.columns(4)
             sc1.markdown(f'<div class="stat-card"><h3>{total_video_count}</h3><p>Total Videos</p></div>', unsafe_allow_html=True)
-            sc2.markdown(f'<div class="stat-card"><h3>{len(playlists)}</h3><p>Playlists</p></div>', unsafe_allow_html=True)
+            sc2.markdown(f'<div class="stat-card"><h3>{len(playlist_data)}</h3><p>Playlists</p></div>', unsafe_allow_html=True)
 
             est = estimate_pipeline_cost(5000 * included_count, model, included_count)
             sc3.markdown(f'<div class="stat-card"><h3>{format_cost(est["total"])}</h3><p>Est. Cost</p></div>', unsafe_allow_html=True)
@@ -344,7 +365,7 @@ with tab_build:
             else:
                 sc4.markdown(f'<div class="stat-card"><h3>{included_count}</h3><p>To Process</p></div>', unsafe_allow_html=True)
 
-            # Cost table
+            # Cost table + Playlist multi-select
             st.markdown("---")
             cost_col1, cost_col2 = st.columns(2)
             with cost_col1:
@@ -355,66 +376,50 @@ with tab_build:
                 st.markdown(f"- **Total**: **{format_cost(est['total'])}**")
                 st.caption(f"Budget limit: {format_cost(budget)}")
 
-            # Playlists with REAL video counts + multi-select
             with cost_col2:
                 st.markdown("#### Playlists (Chapters)")
                 st.caption("Select which playlists to include:")
-                db2 = Database(OUTPUT_DIR / "channel2book.db")
-                run_async(db2.connect())
-                try:
-                    playlist_data = []
-                    for pl in playlists:
-                        all_pl_vids = run_async(db2.get_videos(playlist_id=pl.id, included_only=False))
-                        playlist_data.append((pl, len(all_pl_vids)))
 
-                    # Store playlist data in session state for the build step
-                    if "playlist_data" not in st.session_state:
-                        st.session_state["playlist_data"] = {}
+                # Select All / Deselect All
+                sel_c1, sel_c2 = st.columns(2)
+                if sel_c1.button("Select All", key="sel_all", use_container_width=True):
+                    for pd in playlist_data:
+                        st.session_state[f"pl_{pd['id']}"] = True
+                    st.rerun()
+                if sel_c2.button("Deselect All", key="desel_all", use_container_width=True):
+                    for pd in playlist_data:
+                        st.session_state[f"pl_{pd['id']}"] = False
+                    st.rerun()
 
-                    # Select All / Deselect All buttons
-                    sel_c1, sel_c2 = st.columns(2)
-                    if sel_c1.button("Select All", key="sel_all", use_container_width=True):
-                        for pl, _ in playlist_data:
-                            st.session_state[f"pl_{pl.id}"] = True
-                    if sel_c2.button("Deselect All", key="desel_all", use_container_width=True):
-                        for pl, _ in playlist_data:
-                            st.session_state[f"pl_{pl.id}"] = False
-
-                    selected_playlists = []
-                    for i, (pl, count) in enumerate(playlist_data[:50]):
-                        key = f"pl_{pl.id}"
-                        # Default to selected
-                        if key not in st.session_state:
-                            st.session_state[key] = True
-                        checked = st.checkbox(
-                            f"{pl.title}  ({count} videos)",
-                            key=key,
-                        )
-                        if checked:
-                            selected_playlists.append(pl.id)
-
-                    if len(playlists) > 50:
-                        st.caption(f"+ {len(playlists) - 50} more playlists")
-
-                    # Store selected playlist IDs for the build step
-                    st.session_state["selected_playlists"] = selected_playlists
-
-                    selected_vid_count = 0
-                    for pl, count in playlist_data:
-                        if pl.id in selected_playlists:
-                            selected_vid_count += count
-
-                    st.markdown(
-                        f"**{len(selected_playlists)}/{len(playlists)}** playlists selected "
-                        f"(**{selected_vid_count}** videos)"
+                selected_playlists = []
+                for pd in playlist_data[:50]:
+                    key = f"pl_{pd['id']}"
+                    if key not in st.session_state:
+                        st.session_state[key] = True
+                    checked = st.checkbox(
+                        f"{pd['title']}  ({pd['count']} videos)",
+                        key=key,
                     )
-                finally:
-                    run_async(db2.close())
+                    if checked:
+                        selected_playlists.append(pd["id"])
+
+                if len(playlist_data) > 50:
+                    st.caption(f"+ {len(playlist_data) - 50} more playlists")
+
+                st.session_state["selected_playlists"] = selected_playlists
+
+                selected_vid_count = sum(
+                    pd["count"] for pd in playlist_data if pd["id"] in selected_playlists
+                )
+                st.markdown(
+                    f"**{len(selected_playlists)}/{len(playlist_data)}** playlists selected "
+                    f"(**{selected_vid_count}** videos)"
+                )
 
             if max_videos > 0 and max_videos < total_video_count:
                 st.info(f"Processing limited to **{max_videos}** videos (set Max Videos to 0 for all)")
 
-        elif full_run:
+        if full_run:
             # Check if API key is available for the selected model
             needs_key = True
             key_name = "ANTHROPIC_API_KEY"
