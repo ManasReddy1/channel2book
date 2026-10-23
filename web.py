@@ -7,7 +7,6 @@ Run: streamlit run web.py
 import asyncio
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -131,49 +130,63 @@ def run_async(coro):
 
 
 def search_channel(query: str) -> list[dict]:
-    """Search YouTube for channels matching the query."""
+    """Search YouTube for channels matching the query using yt_dlp library."""
+    import yt_dlp
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": True,
+    }
+
+    matches = []
+    seen = set()
+
+    # Strategy 1: Try direct @handle resolution (e.g. "3Blue1Brown" → @3Blue1Brown)
+    handle_guess = query.strip().replace(" ", "")
+    if not handle_guess.startswith("@"):
+        handle_guess = f"@{handle_guess}"
     try:
-        result = subprocess.run(
-            ["yt-dlp", f"ytsearch5:{query}", "--dump-json", "--flat-playlist",
-             "--playlist-items", "1:5"],
-            capture_output=True, text=True, timeout=30,
-        )
-        matches = []
-        seen = set()
-        for line in result.stdout.strip().split("\n"):
-            if not line.strip():
-                continue
-            try:
-                data = json.loads(line)
-                ch_url = data.get("channel_url") or data.get("uploader_url") or ""
-                ch_name = data.get("channel") or data.get("uploader") or ""
-                ch_id = data.get("channel_id") or data.get("uploader_id") or ""
+        with yt_dlp.YoutubeDL({**ydl_opts, "playlist_items": "1"}) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/{handle_guess}", download=False
+            )
+            if info:
+                ch_id = info.get("channel_id") or info.get("id") or ""
+                ch_name = info.get("channel") or info.get("title") or query
+                ch_url = info.get("channel_url") or info.get("webpage_url") or ""
+                subs = info.get("channel_follower_count")
+                if ch_id and ch_id not in seen:
+                    seen.add(ch_id)
+                    matches.append({
+                        "name": ch_name,
+                        "url": ch_url,
+                        "id": ch_id,
+                        "subscribers": subs,
+                    })
+    except Exception:
+        pass
+
+    # Strategy 2: Video search — extract unique channels from results
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(f"ytsearch10:{query}", download=False)
+            for entry in (result or {}).get("entries", []):
+                ch_url = entry.get("channel_url") or entry.get("uploader_url") or ""
+                ch_name = entry.get("channel") or entry.get("uploader") or ""
+                ch_id = entry.get("channel_id") or entry.get("uploader_id") or ""
                 if ch_url and ch_id and ch_id not in seen:
                     seen.add(ch_id)
                     matches.append({
                         "name": ch_name,
                         "url": ch_url,
                         "id": ch_id,
-                        "subscribers": data.get("channel_follower_count"),
+                        "subscribers": entry.get("channel_follower_count"),
                     })
-            except json.JSONDecodeError:
-                continue
-        return matches[:5]
     except Exception:
-        return []
+        pass
 
-
-def count_playlist_videos(playlist_id: str) -> int:
-    """Get actual video count for a playlist by fetching it directly."""
-    try:
-        result = subprocess.run(
-            ["yt-dlp", "--flat-playlist", "--dump-json",
-             f"https://www.youtube.com/playlist?list={playlist_id}"],
-            capture_output=True, text=True, timeout=60,
-        )
-        return len([l for l in result.stdout.strip().split("\n") if l.strip()])
-    except Exception:
-        return 0
+    return matches[:8]
 
 
 # --- Hero ---

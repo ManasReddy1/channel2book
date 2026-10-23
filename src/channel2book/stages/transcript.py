@@ -154,17 +154,18 @@ async def _try_youtube_transcript_api(video_id: str) -> Optional[Transcript]:
 
 async def _try_ytdlp_subtitles(video_id: str) -> Optional[Transcript]:
     """Try yt-dlp to extract subtitles."""
-    import subprocess
     import tempfile
     import os
+    from channel2book.utils.ytdlp import get_ytdlp_cmd
 
     url = f"https://www.youtube.com/watch?v={video_id}"
+    ytdlp_cmd = get_ytdlp_cmd()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path = os.path.join(tmpdir, "subs")
         try:
             proc = await asyncio.create_subprocess_exec(
-                "yt-dlp", "--write-auto-sub", "--sub-lang", "en",
+                *ytdlp_cmd, "--write-auto-sub", "--sub-lang", "en",
                 "--skip-download", "--sub-format", "json3",
                 "-o", out_path, url,
                 stdout=asyncio.subprocess.PIPE,
@@ -206,16 +207,17 @@ async def _try_ytdlp_subtitles(video_id: str) -> Optional[Transcript]:
 async def _try_whisper(video_id: str, model_size: str) -> Optional[Transcript]:
     """Try faster-whisper local transcription."""
     try:
-        import subprocess
         import tempfile
         import os
+        from channel2book.utils.ytdlp import get_ytdlp_cmd
 
         url = f"https://www.youtube.com/watch?v={video_id}"
+        ytdlp_cmd = get_ytdlp_cmd()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = os.path.join(tmpdir, "audio.m4a")
             proc = await asyncio.create_subprocess_exec(
-                "yt-dlp", "-f", "bestaudio[ext=m4a]",
+                *ytdlp_cmd, "-f", "bestaudio[ext=m4a]",
                 "-o", audio_path, url,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

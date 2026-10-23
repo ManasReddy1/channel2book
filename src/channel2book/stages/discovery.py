@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from datetime import datetime
 from typing import Optional
 
@@ -13,6 +12,7 @@ from channel2book.db import Database
 from channel2book.models import Channel, Playlist, Video
 from channel2book.utils.slugify import slugify
 from channel2book.utils.progress import console, print_warning
+from channel2book.utils.ytdlp import run_ytdlp
 
 
 async def run_discovery(config: Config, db: Database) -> str:
@@ -108,10 +108,7 @@ async def run_discovery(config: Config, db: Database) -> str:
 
 def _extract_channel_info(url: str) -> Channel:
     """Use yt-dlp to get channel metadata."""
-    result = subprocess.run(
-        ["yt-dlp", "--dump-json", "--playlist-items", "0", "--flat-playlist", url],
-        capture_output=True, text=True, timeout=60,
-    )
+    result = run_ytdlp("--dump-json", "--playlist-items", "0", "--flat-playlist", url, timeout=60)
 
     # Try to parse channel info from the output
     channel_id = ""
@@ -143,10 +140,7 @@ def _extract_channel_info(url: str) -> Channel:
 def _extract_playlists(url: str, channel_id: str) -> list[Playlist]:
     """Extract all playlists from a channel."""
     playlists_url = url.rstrip("/") + "/playlists"
-    result = subprocess.run(
-        ["yt-dlp", "--dump-json", "--flat-playlist", playlists_url],
-        capture_output=True, text=True, timeout=120,
-    )
+    result = run_ytdlp("--dump-json", "--flat-playlist", playlists_url)
 
     playlists = []
     seen_ids: set[str] = set()
@@ -173,10 +167,7 @@ def _extract_playlists(url: str, channel_id: str) -> list[Playlist]:
 def _extract_playlist_videos(playlist_id: str, channel_id: str) -> list[Video]:
     """Extract all videos from a playlist."""
     url = f"https://www.youtube.com/playlist?list={playlist_id}"
-    result = subprocess.run(
-        ["yt-dlp", "--dump-json", "--flat-playlist", url],
-        capture_output=True, text=True, timeout=120,
-    )
+    result = run_ytdlp("--dump-json", "--flat-playlist", url)
 
     videos = []
     for line in result.stdout.strip().split("\n"):
@@ -206,10 +197,7 @@ def _extract_playlist_videos(playlist_id: str, channel_id: str) -> list[Video]:
 def _find_orphan_videos(url: str, channel_id: str, seen_ids: set[str]) -> list[Video]:
     """Find videos in uploads that aren't in any playlist."""
     videos_url = url.rstrip("/") + "/videos"
-    result = subprocess.run(
-        ["yt-dlp", "--dump-json", "--flat-playlist", videos_url],
-        capture_output=True, text=True, timeout=120,
-    )
+    result = run_ytdlp("--dump-json", "--flat-playlist", videos_url)
 
     orphans = []
     for line in result.stdout.strip().split("\n"):
